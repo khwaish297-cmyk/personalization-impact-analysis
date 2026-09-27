@@ -1,0 +1,127 @@
+# 1. Understand the sample ----------------------------------------------------
+print(table(Segment = book$segment, Treatment = book$tx))
+print(summary(book[required]))
+
+# 2. Does personalization increase the probability of buying? -----------------
+# prop.test uses a two-sided test with continuity correction.
+# Positive differences mean the personalized group purchased more often.
+purchase_results <- do.call(rbind, lapply(1:4, function(s) {
+  d <- book[book$RFseg == s, ]
+  control <- d$buy[d$tx == 0]
+  personalized <- d$buy[d$tx == 1]
+  if (!length(control) || !length(personalized)) stop("An experiment arm is empty.")
+  test <- prop.test(x = c(sum(personalized), sum(control)),
+                    n = c(length(personalized), length(control)),
+                    alternative = "two.sided", correct = TRUE)
+  data.frame(segment = segment_names[s],
+             control_n = length(control), personalized_n = length(personalized),
+             control_buyers = sum(control), personalized_buyers = sum(personalized),
+             control_rate_pct = 100 * mean(control),
+             personalized_rate_pct = 100 * mean(personalized),
+             lift_percentage_points = 100 * (mean(personalized) - mean(control)),
+             difference_ci_low_pp = 100 * test$conf.int[1],
+             difference_ci_high_pp = 100 * test$conf.int[2],
+             p_value = test$p.value)
+}))
+# Show both original per-test p-values and adjustment across four segments.
+purchase_results$p_holm <- p.adjust(purchase_results$p_value, method = "holm")
+print(purchase_results)
+save_table(purchase_results, "purchase_rates.csv")
+
+# 3. Compare outcomes with Welch's two-sample t-test ---------------------------
+# Always calculate personalized minus control, with a 95% confidence interval.
+compare_means <- function(d, variable, log_scale = FALSE) {
+  do.call(rbind, lapply(1:4, function(s) {
+    group <- d[d$RFseg == s, ]
+    control <- group[[variable]][group$tx == 0]
+    personalized <- group[[variable]][group$tx == 1]
+    if (min(length(control), length(personalized)) < 2) stop("Too few observations for t-test.")
+    if (log_scale) {
+      if (any(c(control, personalized) <= 0)) stop("Log comparisons require positive values.")
+      control <- log(control)
+      personalized <- log(personalized)
+    }
+    test <- t.test(personalized, control, alternative = "two.sided", var.equal = FALSE)
+    data.frame(segment = segment_names[s], outcome = variable,
+               scale = if (log_scale) "natural_log" else "raw",
+               control_n = length(control), personalized_n = length(personalized),
+               control_mean = mean(control), personalized_mean = mean(personalized),
+               difference = mean(personalized) - mean(control),
+               ci_low = test$conf.int[1], ci_high = test$conf.int[2], p_value = test$p.value)
+  }))
+}
+
+# Q2/Q3: Order size and amount among buyers only.
+# These are conditional comparisons: personalization may change WHO buys.
+# They do not identify the causal order-size effect for a fixed set of buyers.
+buyers <- book[book$buy == 1, ]
+order_results <- rbind(compare_means(buyers, "totitem"),
+                       compare_means(buyers, "toteuro"))
+order_results$p_holm <- p.adjust(order_results$p_value, method = "holm")
+print(order_results)
+save_table(order_results, "buyer_order_comparisons.csv")
+
+# Sensitivity check for skewed spending and large orders.
+# Log-scale means are NOT average book counts or average euros.
+log_results <- rbind(compare_means(buyers, "totitem", TRUE),
+                     compare_means(buyers, "toteuro", TRUE))
+log_results$p_holm <- p.adjust(log_results$p_value, method = "holm")
+print(log_results)
+save_table(log_results, "buyer_log_scale_comparisons.csv")
+
+# 4. Financial implications ---------------------------------------------------
+# Revenue per contacted customer includes non-buyers (zero revenue).
+# This combines purchase probability and order value without double counting.
+revenue_results <- compare_means(book, "toteuro")
+revenue_results$p_holm <- p.adjust(revenue_results$p_value, method = "holm")
+save_table(revenue_results, "revenue_per_contact.csv")
+
+# Scenario: 5 million annual contacts, with the same segment mix as this sample.
+# This is an assumption, not observed annual revenue. Point estimates and CIs
+# extrapolate experimental per-contact differences; they are not guarantees.
+annual_contacts <- 5000000
+segment_share <- as.numeric(table(factor(book$RFseg, levels = 1:4))) / nrow(book)
+financial_scenario <- data.frame(
+  segment = segment_names,
+  assumed_annual_contacts = annual_contacts * segment_share,
+  incremental_revenue_per_contact_eur = revenue_results$difference,
+  projected_incremental_revenue_eur = annual_contacts * segment_share * revenue_results$difference,
+  projected_ci_low_eur = annual_contacts * segment_share * revenue_results$ci_low,
+  projected_ci_high_eur = annual_contacts * segment_share * revenue_results$ci_high
+)
+print(financial_scenario)
+save_table(financial_scenario, "annual_revenue_scenario.csv")
+# Profit requires contribution margin and incremental personalization costs.
+# No profit or ROI claim is made from revenue alone. Confidence intervals above
+# are per-segment intervals, not simultaneous intervals for the entire rollout.
+
+# 5. Simple charts ------------------------------------------------------------
+make_charts <- function() {
+  pdf(file.path(output_dir, "personalization_charts.pdf"), width = 10, height = 6)
+  on.exit(dev.off())
+  par(mar = c(6, 5, 4, 2))
+  rates <- rbind(purchase_results$control_rate_pct,
+                 purchase_results$personalized_rate_pct)
+  barplot(rates, beside = TRUE, names.arg = segment_names,
+          col = c("#BFC7D5", "#245C48"), ylim = c(0, max(rates) * 1.3),
+          main = "Purchase rates by customer segment", ylab = "Customers purchasing (%)",
+          legend.text = c("Generic", "Personalized"),
+          args.legend = list(x = "topleft", bty = "n"))
+  for (v in c("totitem", "toteuro")) {
+    rows <- order_results[order_results$outcome == v, ]
+    values <- rbind(rows$control_mean, rows$personalized_mean)
+    barplot(values, beside = TRUE, names.arg = segment_names,
+            col = c("#BFC7D5", "#245C48"), ylim = c(0, max(values) * 1.3),
+            main = if (v == "totitem") "Average items among buyers" else "Average euros among buyers",
+            ylab = if (v == "totitem") "Items per buyer" else "Euros per buyer",
+            legend.text = c("Generic", "Personalized"),
+            args.legend = list(x = "topleft", bty = "n"))
+  }
+  boxplot(log(toteuro) ~ interaction(tx, segment), data = buyers,
+          las = 2, col = "#A7C8B8", main = "Order value distribution among buyers",
+          ylab = "Natural log of euros", xlab = "")
+}
+make_charts()
+capture.output(sessionInfo(), file = file.path(output_dir, "session_info.txt"))
+message("Finished. Results saved in: ", normalizePath(output_dir))
+
