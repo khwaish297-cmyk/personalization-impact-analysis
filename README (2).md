@@ -54,7 +54,7 @@ Determine which customers respond to personalized recommendations and whether pe
 - Purchase-rate differences for new and active customers were not statistically significant at the 5% level.
 - Among long-lapsed buyers, average order size was **4.35 items with generic recommendations versus 5.61 with personalization**.
 
-The results support prioritizing lapsed customers for further personalization testing. Comparisons among buyers describe those who purchased; they do not isolate the effect on order size for the same customers. Revenue opportunities should be evaluated alongside implementation costs before making profitability claims.
+The results support prioritizing lapsed customers for further personalization testing. Comparisons among buyers describe those who purchased; they do not isolate the effect on order size for the same customers. 
 
 ---
 
@@ -75,4 +75,3 @@ The original R script is not included. This README summarizes the group project 
 
 *Northwestern University, IMC460: Data Science. Group project by Ina Lin, Cindy Chou, Khwaish Gohil, Yin Zhi, and Priya Thakore.*
 
-*The figures above use the supplied data and raw-scale comparisons. They clarify discrepancies in the original slides and do not repeat the slides' unverified ROI estimates.*
